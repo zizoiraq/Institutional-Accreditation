@@ -556,7 +556,6 @@ async function analyzeWithAIByStandard(text) {
 
     const list = standardIndicators.map(ind => `[${ind.code}] (${ind.standard} - ${ind.element}) ${ind.text}`).join('\n');
     
-    // نطلب من الذكاء الاصطناعي التركيز على الغرض الأساسي للنص
     const userPrompt = `النص الكامل للأمر الإداري:\n"""\n${text}\n"""\n\nقم بتقييم هذا النص مقابل مؤشرات هذا المعيار فقط (${std.standard}).\nتذكر: ركز على الغرض الأساسي من النص (مثلاً شراء كتب = مصادر معلومات) ولا تنجرف وراء الكلمات المفتاحية.\nالمؤشرات:\n${list}\n\nحلل وأعد JSON فقط.`;
 
     const progressPercent = Math.round((sIdx / totalStandards) * 100);
@@ -586,9 +585,14 @@ async function analyzeWithAIByStandard(text) {
       content = content.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
       const parsed = JSON.parse(content);
 
+      // جمع النتائج
       if (parsed.results) allResults = allResults.concat(parsed.results);
       if (parsed.irrelevant_codes) allIrrelevant = allIrrelevant.concat(parsed.irrelevant_codes);
-      if (parsed.summary) allSummaries.push(parsed.summary);
+      
+      // جمع الخلاصة فقط إذا وجدنا نتائج فعلية في هذا المعيار
+      if (parsed.results && parsed.results.length > 0 && parsed.summary) {
+        allSummaries.push(parsed.summary);
+      }
 
     } catch (err) {
       console.warn(`تخطي المعيار ${sIdx + 1}:`, err.message);
@@ -601,8 +605,18 @@ async function analyzeWithAIByStandard(text) {
   statusText.textContent = '3/3: جاري دمج النتائج وعرضها...';
   await new Promise(r => setTimeout(r, 800));
 
+  // دمج الخلاصات في نص واحد
+  let finalSummary = 'تم إكمال التحليل.';
+  if (allSummaries.length > 0) {
+    // إزالة التكرار إن وجد
+    const uniqueSummaries = [...new Set(allSummaries)];
+    finalSummary = uniqueSummaries.join(' ');
+  } else {
+    finalSummary = 'لم يتم العثور على أي مؤشرات تتطابق مع هذا الأمر الإداري.';
+  }
+
   return {
-    summary: allSummaries.length > 0 ? allSummaries[0] : 'تم إكمال التحليل.',
+    summary: finalSummary,
     results: allResults,
     irrelevant_codes: allIrrelevant
   };
