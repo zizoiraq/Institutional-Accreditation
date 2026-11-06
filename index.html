@@ -403,7 +403,7 @@ const STANDARDS_DATA = [
   }
 ];
 
-/* ============ تحويل الأرقام إلى حروف عربية (للترتيب) ============ */
+/* ============ تحويل الأرقام إلى حروف عربية ============ */
 function getArabicOrdinal(n) {
   const words = ['', 'الأول', 'الثاني', 'الثالث', 'الرابع', 'الخامس', 'السادس', 'السابع', 'الثامن', 'التاسع', 'العاشر', 'الحادي عشر', 'الثاني عشر', 'الثالث عشر', 'الرابع عشر', 'الخامس عشر', 'السادس عشر', 'السابع عشر', 'الثامن عشر', 'التاسع عشر', 'العشرون'];
   return words[n] || n.toString();
@@ -481,8 +481,8 @@ async function processImage(file) {
     const text = await extractText(file);
     if (!text || text.length < 10) throw new Error('لم يتم التعرف على نص واضح.');
 
-    statusText.textContent = '2/3: جاري تقسيم المؤشرات وإرسالها للتحليل...';
-    const parsedResult = await analyzeWithAIInChunks(text);
+    statusText.textContent = '2/3: جاري تحليل النص بناءً على المعايير...';
+    const parsedResult = await analyzeWithAIByStandard(text);
     renderResults(parsedResult);
   } catch (err) {
     console.error(err);
@@ -509,21 +509,15 @@ async function extractText(file) {
   } finally { await worker.terminate(); }
 }
 
-/* ============ 6) وظيفة الذكاء الاصطناعي ============ */
-// تم تحسين التعليمات لتنبيه الذكاء الاصطناعي للكلمات المفتاحية عبر المعايير
+/* ============ 6) وظيفة الذكاء الاصطناعي (تحليل حسب المعيار) ============ */
 const SYSTEM_PROMPT = `أنت خبير تقييم جودة واعتماد مؤسسي في التعليم العالي.
-مهمتك: قراءة نص الأمر الإداري ومطابقته مع قائمة المؤشرات المرجعية بدقة شديدة.
+مهمتك: قراءة "النص الكامل" للأمر الإداري وفهم "النية والمضمون" منه، ثم مطابقته مع قائمة المؤشرات المعروضة.
+لا تعتمد على مطابقة الكلمات الحرفية فقط، بل افهم سياق النص (مثلاً: إذا طلب الأمر إعداد دليل للمكتبة، فهذا يعني أنه يخدم مؤشر توفر دليل المكتبة).
 قواعد التقييم:
 - "مستوفي": النص يثبت بشكل صريح وكامل وجود ما يطلبه المؤشر.
-- "مستوفي جزئي": النص يتعلق بالمؤشر ويغطي جزءًا منه فقط.
+- "مستوفي جزئي": النص يتعلق بالمؤشر ويغطي جزءًا منه فقط، أو يمهد لوجوده.
 - "غير مستوفي": النص يتعلق بموضوع المؤشر لكنه لا يحقق متطلباته.
 - إذا لم تكن هناك علاقة، ضع الرمز في irrelevant_codes.
-
-تنبيهات هامة جداً (لمنع تفويت المؤشرات):
-1. إذا ذكر النص "مكتبة" أو "دليل مكتبة" أو "دليل تعريفي بمكتبة"، يجب فوراً ربطه بمؤشر (مصادر المعلومات) في معيار (البحث العلمي).
-2. إذا ذكر النص "تشكيل لجنة" أو "أعضاء"، تحقق من مؤشرات (الهياكل التنظيمية) و(بناء القدرات) في معيار (الحوكمة والإدارة).
-3. إذا ذكر النص "دليل تعريفي" أو "نشر معلومات"، تحقق من مؤشر (نشر المعلومات) في معيار (الحوكمة والإدارة).
-4. لا تفوت أي مؤشر له علاقة بكلمة مفتاحية في النص.
 
 اعتمد على النص فقط. أعد JSON فقط:
 {
@@ -532,23 +526,32 @@ const SYSTEM_PROMPT = `أنت خبير تقييم جودة واعتماد مؤس
   "irrelevant_codes": ["رمز1", "رمز2"]
 }`;
 
-async function analyzeWithAIInChunks(text) {
-  const CHUNK_SIZE = 30; // زيادة الحجم قليلاً لإعطاء سياق أفضل
-  const totalChunks = Math.ceil(INDICATORS.length / CHUNK_SIZE);
+async function analyzeWithAIByStandard(text) {
+  // تقسيم المؤشرات حسب المعيار
+  const totalStandards = STANDARDS_DATA.length;
   let allResults = [];
   let allIrrelevant = [];
   let allSummaries = [];
 
   progressContainer.style.display = 'block';
 
-  for (let i = 0; i < totalChunks; i++) {
-    const chunk = INDICATORS.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
-    const list = chunk.map(ind => `[${ind.code}] (${ind.standard} - ${ind.element}) ${ind.text}`).join('\n');
-    const userPrompt = `نص الأمر الإداري:\n"""\n${text}\n"""\n\nالمؤشرات المتاحة:\n${list}\n\nحلل وأعد JSON فقط.`;
+  for (let sIdx = 0; sIdx < totalStandards; sIdx++) {
+    const std = STANDARDS_DATA[sIdx];
+    // جمع مؤشرات هذا المعيار فقط
+    const standardIndicators = [];
+    std.elements.forEach(el => {
+      el.items.forEach((txt, iIdx) => {
+        const code = `${sIdx + 1}-${el.n}-${iIdx + 1}`;
+        standardIndicators.push({ code, standard: std.standard, element: el.element, text: txt });
+      });
+    });
 
-    const progressPercent = Math.round((i / totalChunks) * 100);
+    const list = standardIndicators.map(ind => `[${ind.code}] (${ind.standard} - ${ind.element}) ${ind.text}`).join('\n');
+    const userPrompt = `النص الكامل للأمر الإداري:\n"""\n${text}\n"""\n\nقم بتقييم هذا النص مقابل مؤشرات هذا المعيار فقط:\n${list}\n\nحلل وأعد JSON فقط.`;
+
+    const progressPercent = Math.round((sIdx / totalStandards) * 100);
     progressBar.style.width = `${progressPercent}%`;
-    statusText.textContent = `2/3: جاري تحليل الدفعة ${i + 1} من ${totalChunks} (${progressPercent}%)...`;
+    statusText.textContent = `2/3: جاري تحليل معيار (${std.standard.split('.')[1].trim()}) (${progressPercent}%)...`;
 
     try {
       let base = BASE_URL.trim().replace(/\/+$/, '');
@@ -558,14 +561,14 @@ async function analyzeWithAIInChunks(text) {
         body: JSON.stringify({
           model: MODEL_NAME,
           messages: [{ role: 'system', content: SYSTEM_PROMPT }, { role: 'user', content: userPrompt }],
-          temperature: 0.1, max_tokens: 2000, response_format: { type: 'json_object' }
+          temperature: 0.1, max_tokens: 2500, response_format: { type: 'json_object' }
         })
       });
 
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
         const errMsg = errData.error?.message || `خطأ في الاتصال (${res.status})`;
-        throw new Error(`فشل تحليل الدفعة ${i + 1}: ${errMsg}`);
+        throw new Error(`فشل تحليل المعيار ${sIdx + 1}: ${errMsg}`);
       }
 
       const data = await res.json();
@@ -578,10 +581,10 @@ async function analyzeWithAIInChunks(text) {
       if (parsed.summary) allSummaries.push(parsed.summary);
 
     } catch (err) {
-      console.warn(`تخطي الدفعة ${i + 1}:`, err.message);
+      console.warn(`تخطي المعيار ${sIdx + 1}:`, err.message);
     }
     
-    await new Promise(r => setTimeout(r, 500));
+    await new Promise(r => setTimeout(r, 600)); // تأخير بسيط لتجنب حدود المعدل
   }
 
   progressBar.style.width = '100%';
@@ -589,7 +592,7 @@ async function analyzeWithAIInChunks(text) {
   await new Promise(r => setTimeout(r, 800));
 
   return {
-    summary: allSummaries.length > 0 ? allSummaries[0] : 'تم إكمال التحليل.',
+    summary: allSummaries.length > 0 ? allSummaries[0] : 'تم إكمال التحليل.', // عرض أول خلاصة كافية
     results: allResults,
     irrelevant_codes: allIrrelevant
   };
