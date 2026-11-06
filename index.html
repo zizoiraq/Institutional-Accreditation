@@ -509,15 +509,23 @@ async function extractText(file) {
   } finally { await worker.terminate(); }
 }
 
-/* ============ 6) وظيفة الذكاء الاصطناعي (مقسمة إلى دفعات) ============ */
+/* ============ 6) وظيفة الذكاء الاصطناعي ============ */
+// تم تحسين التعليمات لتنبيه الذكاء الاصطناعي للكلمات المفتاحية عبر المعايير
 const SYSTEM_PROMPT = `أنت خبير تقييم جودة واعتماد مؤسسي في التعليم العالي.
-مهمتك: قراءة نص الأمر الإداري ومطابقته مع قائمة المؤشرات المرجعية.
+مهمتك: قراءة نص الأمر الإداري ومطابقته مع قائمة المؤشرات المرجعية بدقة شديدة.
 قواعد التقييم:
 - "مستوفي": النص يثبت بشكل صريح وكامل وجود ما يطلبه المؤشر.
 - "مستوفي جزئي": النص يتعلق بالمؤشر ويغطي جزءًا منه فقط.
 - "غير مستوفي": النص يتعلق بموضوع المؤشر لكنه لا يحقق متطلباته.
 - إذا لم تكن هناك علاقة، ضع الرمز في irrelevant_codes.
-اعتمد على النص فقط، ولا تتخيل. أعد JSON فقط:
+
+تنبيهات هامة جداً (لمنع تفويت المؤشرات):
+1. إذا ذكر النص "مكتبة" أو "دليل مكتبة" أو "دليل تعريفي بمكتبة"، يجب فوراً ربطه بمؤشر (مصادر المعلومات) في معيار (البحث العلمي).
+2. إذا ذكر النص "تشكيل لجنة" أو "أعضاء"، تحقق من مؤشرات (الهياكل التنظيمية) و(بناء القدرات) في معيار (الحوكمة والإدارة).
+3. إذا ذكر النص "دليل تعريفي" أو "نشر معلومات"، تحقق من مؤشر (نشر المعلومات) في معيار (الحوكمة والإدارة).
+4. لا تفوت أي مؤشر له علاقة بكلمة مفتاحية في النص.
+
+اعتمد على النص فقط. أعد JSON فقط:
 {
   "summary": "خلاصة تحليلية بالعربية في 2-3 أسطر",
   "results": [{"code": "الرمز_هنا", "status": "مستوفي", "confidence": 0.9, "reason": "السبب", "evidence": "اقتباس"}],
@@ -525,7 +533,7 @@ const SYSTEM_PROMPT = `أنت خبير تقييم جودة واعتماد مؤس
 }`;
 
 async function analyzeWithAIInChunks(text) {
-  const CHUNK_SIZE = 20; // عدد المؤشرات في كل طلب
+  const CHUNK_SIZE = 30; // زيادة الحجم قليلاً لإعطاء سياق أفضل
   const totalChunks = Math.ceil(INDICATORS.length / CHUNK_SIZE);
   let allResults = [];
   let allIrrelevant = [];
@@ -550,7 +558,7 @@ async function analyzeWithAIInChunks(text) {
         body: JSON.stringify({
           model: MODEL_NAME,
           messages: [{ role: 'system', content: SYSTEM_PROMPT }, { role: 'user', content: userPrompt }],
-          temperature: 0.1, max_tokens: 1500, response_format: { type: 'json_object' }
+          temperature: 0.1, max_tokens: 2000, response_format: { type: 'json_object' }
         })
       });
 
@@ -573,7 +581,7 @@ async function analyzeWithAIInChunks(text) {
       console.warn(`تخطي الدفعة ${i + 1}:`, err.message);
     }
     
-    await new Promise(r => setTimeout(r, 500)); // تأخير بسيط بين الطلبات
+    await new Promise(r => setTimeout(r, 500));
   }
 
   progressBar.style.width = '100%';
